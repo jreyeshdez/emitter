@@ -413,6 +413,11 @@ func (c *Conn) onPresence(payload []byte) (response, bool) {
 		return errors.ErrUnauthorized, false
 	}
 
+	// Keys which are supposed to be extended should not be used for presence
+	if key.HasPermission(security.AllowExtend) {
+		return errors.ErrUnauthorizedExt, false
+	}
+
 	// Attempt to fetch the contract using the key. Underneath, it's cached.
 	contract, contractFound := c.service.contracts.Get(key.Contract())
 	if !contractFound {
