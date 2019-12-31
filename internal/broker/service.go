@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/emitter-io/emitter/internal/stream"
 	"io"
 	"net"
 	"net/http"
@@ -51,23 +52,24 @@ import (
 
 // Service represents the main structure.
 type Service struct {
-	connections   int64                // The number of currently open connections.
-	context       context.Context      // The context for the service.
-	cancel        context.CancelFunc   // The cancellation function.
-	License       license.License      // The licence for this emitter server.
-	Keygen        *keygen.Provider     // The key generation provider.
-	Config        *config.Config       // The configuration for the service.
-	subscriptions *message.Trie        // The subscription matching trie.
-	http          *http.Server         // The underlying HTTP server.
-	tcp           *tcp.Server          // The underlying TCP server.
-	cluster       *cluster.Swarm       // The gossip-based cluster mechanism.
-	presence      chan *presenceNotify // The channel for presence notifications.
-	querier       *QueryManager        // The generic query manager.
-	contracts     contract.Provider    // The contract provider for the service.
-	storage       storage.Storage      // The storage provider for the service.
-	monitor       monitor.Storage      // The storage provider for stats.
-	measurer      stats.Measurer       // The monitoring registry for the service.
-	metering      usage.Metering       // The usage storage for metering contracts.
+	connections   int64                  // The number of currently open connections.
+	context       context.Context        // The context for the service.
+	cancel        context.CancelFunc     // The cancellation function.
+	License       license.License        // The licence for this emitter server.
+	Keygen        *keygen.Provider       // The key generation provider.
+	Config        *config.Config         // The configuration for the service.
+	subscriptions *message.Trie          // The subscription matching trie.
+	http          *http.Server           // The underlying HTTP server.
+	tcp           *tcp.Server            // The underlying TCP server.
+	cluster       *cluster.Swarm         // The gossip-based cluster mechanism.
+	presence      chan *presenceNotify   // The channel for presence notifications.
+	querier       *QueryManager          // The generic query manager.
+	contracts     contract.Provider      // The contract provider for the service.
+	storage       storage.Storage        // The storage provider for the service.
+	monitor       monitor.Storage        // The storage provider for stats.
+	measurer      stats.Measurer         // The monitoring registry for the service.
+	metering      usage.Metering         // The usage storage for metering contracts.
+	stream        stream.KinesisProvider // The stream for pushing presence changes to Kinesis
 }
 
 // NewService creates a new service.
@@ -83,6 +85,7 @@ func NewService(ctx context.Context, cfg *config.Config) (s *Service, err error)
 		presence:      make(chan *presenceNotify, 100),
 		storage:       new(storage.Noop),
 		measurer:      stats.New(),
+		stream:        stream.NewStream(cfg.AwsConfig.KinesisStream, cfg.AwsConfig.AWSRegion),
 	}
 
 	// Create a new HTTP request multiplexer
@@ -205,19 +208,10 @@ func (s *Service) Listen() (err error) {
 	}
 
 	// Setup the listeners on both default and a secure addresses
-	s.listen(s.Config.Addr(), nil)
-	if tls, tlsValidator, ok := s.Config.Certificate(); ok {
-
-		// If we need to validate certificate, spin up a listener on port 80
-		// More info: https://community.letsencrypt.org/t/2018-01-11-update-regarding-acme-tls-sni-and-shared-hosting-infrastructure/50188
-		if tlsValidator != nil {
-			logging.LogAction("service", "exposing autocert TLS validation on :80")
-			go http.ListenAndServe(":80", tlsValidator)
-		}
-
-		if tlsAddr, err := address.Parse(s.Config.TLS.ListenAddr, 443); err == nil {
-			s.listen(tlsAddr, tls)
-		}
+	s.listen(s.Config.Addr(), nil, "tcp")
+	s.listen(s.Config.HTTPAddr(), nil, "http")
+	if tlsAddr, err := address.Parse(s.Config.TLS.ListenAddr, 443); err == nil {
+		s.listen(tlsAddr, nil, "tcp")
 	}
 
 	// Block
@@ -226,7 +220,7 @@ func (s *Service) Listen() (err error) {
 }
 
 // listen configures an main listener on a specified address.
-func (s *Service) listen(addr *net.TCPAddr, conf *tls.Config) {
+func (s *Service) listen(addr *net.TCPAddr, conf *tls.Config, protocol string) {
 
 	// Create new listener
 	logging.LogTarget("service", "starting the listener", addr)
@@ -242,8 +236,11 @@ func (s *Service) listen(addr *net.TCPAddr, conf *tls.Config) {
 	l.SetReadTimeout(120 * time.Second)
 
 	// Configure the matchers
-	l.ServeAsync(listener.MatchHTTP(), s.http.Serve)
-	l.ServeAsync(listener.MatchAny(), s.tcp.Serve)
+	if protocol == "http" {
+		l.ServeAsync(listener.MatchHTTP(), s.http.Serve)
+	} else if protocol == "tcp" {
+		l.ServeAsync(listener.MatchAny(), s.tcp.Serve)
+	}
 	go l.Serve()
 }
 
@@ -272,28 +269,48 @@ func (s *Service) notifyPresenceChange() {
 // NotifySubscribe notifies the swarm when a subscription occurs.
 func (s *Service) notifySubscribe(conn *Conn, ssid message.Ssid, channel []byte) {
 
+	newPresenceNotify := newPresenceNotify(ssid, presenceSubscribeEvent, string(channel), conn.ID(), conn.username)
+
 	// If we have a new direct subscriber, issue presence message and publish it
 	if channel != nil {
-		s.presence <- newPresenceNotify(ssid, presenceSubscribeEvent, string(channel), conn.ID(), conn.username)
+		s.presence <- newPresenceNotify
 	}
 
 	// Notify our cluster that the client just subscribed.
 	if s.cluster != nil {
 		s.cluster.NotifySubscribe(conn.luid, ssid)
 	}
+
+	b, ok := newPresenceNotify.Encode()
+	if ok {
+		logging.LogAction("service", "pushing subscription to kinesis")
+		if err := s.stream.PutBytes(s.context, b, string(channel)); err != nil {
+			logging.LogError("service", "error while pushing subscription to kinesis", err)
+		}
+	}
 }
 
 // NotifyUnsubscribe notifies the swarm when an unsubscription occurs.
 func (s *Service) notifyUnsubscribe(conn *Conn, ssid message.Ssid, channel []byte) {
 
+	newPresenceNotify := newPresenceNotify(ssid, presenceUnsubscribeEvent, string(channel), conn.ID(), conn.username)
+
 	// If we have a new direct subscriber, issue presence message and publish it
 	if channel != nil {
-		s.presence <- newPresenceNotify(ssid, presenceUnsubscribeEvent, string(channel), conn.ID(), conn.username)
+		s.presence <- newPresenceNotify
 	}
 
 	// Notify our cluster that the client just unsubscribed.
 	if s.cluster != nil {
 		s.cluster.NotifyUnsubscribe(conn.luid, ssid)
+	}
+
+	b, ok := newPresenceNotify.Encode()
+	if ok {
+		logging.LogAction("service", "pushing unsubscription to kinesis")
+		if err := s.stream.PutBytes(s.context, b, string(channel)); err != nil {
+			logging.LogError("service", "error while pushing unsubscription to kinesis", err)
+		}
 	}
 }
 

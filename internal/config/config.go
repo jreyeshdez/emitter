@@ -82,22 +82,25 @@ func New(filename string, stores ...cfg.SecretStore) *Config {
 
 // Config represents main configuration.
 type Config struct {
-	ListenAddr string              `json:"listen"`             // The API port used for TCP & Websocket communication.
-	License    string              `json:"license"`            // The license file to use for the broker.
-	Debug      bool                `json:"debug,omitempty"`    // The debug mode flag.
-	Limit      LimitConfig         `json:"limit,omitempty"`    // Configuration for various limits such as message size.
-	TLS        *cfg.TLSConfig      `json:"tls,omitempty"`      // The API port used for Secure TCP & Websocket communication.
-	Cluster    *ClusterConfig      `json:"cluster,omitempty"`  // The configuration for the clustering.
-	Storage    *cfg.ProviderConfig `json:"storage,omitempty"`  // The configuration for the storage provider.
-	Contract   *cfg.ProviderConfig `json:"contract,omitempty"` // The configuration for the contract provider.
-	Metering   *cfg.ProviderConfig `json:"metering,omitempty"` // The configuration for the usage storage for metering.
-	Logging    *cfg.ProviderConfig `json:"logging,omitempty"`  // The configuration for the logger.
-	Monitor    *cfg.ProviderConfig `json:"monitor,omitempty"`  // The configuration for the monitoring storage.
-	Vault      secretStoreConfig   `json:"vault,omitempty"`    // The configuration for the Hashicorp Vault Secret Store.
-	Dynamo     secretStoreConfig   `json:"dynamodb,omitempty"` // The configuration for the AWS DynamoDB Secret Store.
+	ListenAddr     string              `json:"listen"`               // The API port used for TCP & Websocket communication.
+	HTTPListenAddr string              `json:"http_listen"`          // The API port used for HTTP communication.
+	License        string              `json:"license"`              // The license file to use for the broker.
+	Debug          bool                `json:"debug,omitempty"`      // The debug mode flag.
+	Limit          LimitConfig         `json:"limit,omitempty"`      // Configuration for various limits such as message size.
+	TLS            *cfg.TLSConfig      `json:"tls,omitempty"`        // The API port used for Secure TCP & Websocket communication.
+	Cluster        *ClusterConfig      `json:"cluster,omitempty"`    // The configuration for the clustering.
+	Storage        *cfg.ProviderConfig `json:"storage,omitempty"`    // The configuration for the storage provider.
+	Contract       *cfg.ProviderConfig `json:"contract,omitempty"`   // The configuration for the contract provider.
+	Metering       *cfg.ProviderConfig `json:"metering,omitempty"`   // The configuration for the usage storage for metering.
+	Logging        *cfg.ProviderConfig `json:"logging,omitempty"`    // The configuration for the logger.
+	Monitor        *cfg.ProviderConfig `json:"monitor,omitempty"`    // The configuration for the monitoring storage.
+	Vault          secretStoreConfig   `json:"vault,omitempty"`      // The configuration for the Hashicorp Vault Secret Store.
+	Dynamo         secretStoreConfig   `json:"dynamodb,omitempty"`   // The configuration for the AWS DynamoDB Secret Store.
+	AwsConfig      AwsConfig           `json:"aws_config,omitempty"` // The configuration for the AWS services.
 
-	listenAddr *net.TCPAddr     // The listen address, parsed.
-	certCaches []cfg.CertCacher // The certificate caches configured.
+	listenAddr     *net.TCPAddr     // The listen address, parsed.
+	httpListenAddr *net.TCPAddr     // The listen address, parsed.
+	certCaches     []cfg.CertCacher // The certificate caches configured.
 }
 
 // MaxMessageBytes returns the configured max message size, must be smaller than 64K.
@@ -117,6 +120,17 @@ func (c *Config) Addr() *net.TCPAddr {
 		}
 	}
 	return c.listenAddr
+}
+
+// Addr returns the listen address configured.
+func (c *Config) HTTPAddr() *net.TCPAddr {
+	if c.httpListenAddr == nil {
+		var err error
+		if c.httpListenAddr, err = address.Parse(c.HTTPListenAddr, 8080); err != nil {
+			panic(err)
+		}
+	}
+	return c.httpListenAddr
 }
 
 // Certificate returns TLS configuration.
@@ -171,6 +185,16 @@ type LimitConfig struct {
 	// The maximum socket write rate per connection. This does not limit QpS but instead
 	// can be used to scale throughput. Defaults to 60.
 	FlushRate int `json:"flushRate,omitempty"`
+}
+
+// AwsConfig represents various AWS configurations - such as region, kinesis stream.
+type AwsConfig struct {
+
+	// Kinesis stream
+	KinesisStream string `json:"kinesis_stream,omitempty"`
+
+	// aws region where kinesis stream or other services are
+	AWSRegion string `json:"aws_region,omitempty"`
 }
 
 // LoadProvider loads a provider from the configuration or panics if the configuration is

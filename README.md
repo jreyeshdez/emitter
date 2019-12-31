@@ -142,9 +142,10 @@ The structure of the configuration is described below:
 | Property | Env. Variable | Description |
 |---|---|---|
 | `license` | `EMITTER_LICENSE` | The license file to use for the broker. This contains the encryption key. |
-| `listen` | `EMITTER_LISTEN` | The API address used for TCP & Websocket communication, in `IP:PORT` format (e.g: `:8080`). |
+| `listen` | `EMITTER_LISTEN` | The API address used for TCP & Websocket communication, in `IP:PORT` format (e.g: `:1883`). |
+| `http_listen` | `EMITTER_HTTP_LISTEN` | The API address used for broker management communication, in `IP:PORT` format (e.g: `:8080`). |
 | `limit.messageSize` | `EMITTER_LIMIT_MESSAGESIZE` | Maximum message size. Default is 64KB.
-| `tls.listen` | `EMITTER_TLS_LISTEN` |The API address used for Secure TCP & Websocket communication, in `IP:PORT` format (e.g: `:443`).  |
+| `tls.listen` | `EMITTER_TLS_LISTEN` |The API address used for Secure TCP & Websocket communication, in `IP:PORT` format (e.g: `:8883`).  |
 | `tls.host` | `EMITTER_TLS_HOST` | The hostname to whitelist for the certificate.  |
 | `tls.email` | `EMITTER_TLS_EMAIL` |The email account to use for autocert. |
 | `vault.address` | `EMITTER_VAULT_ADDRESS` | The Hashicorp Vault address to use to further override configuration. |
@@ -155,7 +156,9 @@ The structure of the configuration is described below:
 | `cluster.seed` | `EMITTER_CLUSTER_SEED` | The seed address (or a domain name) for cluster join. |
 | `cluster.passphrase` | `EMITTER_CLUSTER_PASSPHRASE` | Passphrase is used to initialize the primary encryption key in a keyring. This key is used for encrypting all the gossip messages (message-level encryption). |
 | `storage.provider` | `EMITTER_STORAGE_PROVIDER` |  This property represents the publishers publish message storage mode. there are two kinds of can use, they are respectively `inmemory` and `ssd`, defaults to the former. |
-| `storage.config.dir` | `EMITTER_STORAGE_CONFIG` |  If the storage mode is `ssd`, this property indicates where the messages are stored (emitter server nodes are not allowed to use the same directory within the same machine)
+| `storage.config.dir` | `EMITTER_STORAGE_CONFIG` |  If the storage mode is `ssd`, this property indicates where the messages are stored (emitter server nodes are not allowed to use the same directory within the same machine) |
+| `aws_config.kinesis_stream` | `EMITTER_AWS_CONFIG_KINESIS_STREAM` |  This property indicates the Kinesis stream where the presence notifications are pushed to |
+| `aws_config.aws_region` | `EMITTER_AWS_CONFIG_AWS_REGION` |  This property represents what the AWS Region is for the Kinesis stream.
 
 
 

@@ -25,3 +25,8 @@ creds.json
 *.crt
 *.key
 data
+.env
+vendor
+.idea
+.terraform
+.*.tag
